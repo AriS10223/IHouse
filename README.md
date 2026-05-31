@@ -2,7 +2,7 @@
 
 An AI-powered multi-agent advisor built for international university students. It covers the five domains that matter most when you first arrive: **visa & legal**, **academics**, **personal finance**, **jobs & internships**, and **taxes** — all in one CLI conversation that remembers you across sessions.
 
-Built for a hackathon by [AriS10223](https://github.com/AriS10223), developed in collaboration with **Claude (Anthropic)**.
+Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipoluri](https://github.com/anvipoluri), developed in collaboration with **Claude (Anthropic)**.
 
 ---
 
