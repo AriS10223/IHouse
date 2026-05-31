@@ -20,5 +20,6 @@ class AgentState(TypedDict):
     agent_outputs: dict   # domain → agent answer (overwritten each turn)
     draft: str            # synthesizer output
     final: str            # fact-checked final answer
+    claims_found: int     # number of verifiable claims extracted by factcheck
     critic_pass: bool     # True = critic approved, False = needs revision
     critic_feedback: str  # critic's issues list, fed into the revise node

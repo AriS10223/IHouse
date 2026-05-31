@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -45,9 +46,18 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
 
+import wandb
+
 from onboarding import get_or_create_profile, run_questionnaire, save_profile
+from tools import reset_turn_tracking, get_turn_searches
 
 console = Console()
+
+_TABLE_COLS = [
+    "turn", "query", "agents_called", "route_reason",
+    "num_searches", "search_queries",
+    "claims_found", "critic_pass", "revision_made", "latency_ms",
+]
 
 
 def _run_turn(graph, query: str, profile: dict, thread_id: str) -> str:
@@ -95,6 +105,20 @@ def main() -> None:
     profile = get_or_create_profile()
     thread_id = f"user_{profile['name'].lower().replace(' ', '_')}"
 
+    # ── W&B run (for tables/metrics alongside Weave traces) ───────────────────
+    wb_run = wandb.init(
+        project=WANDB_PROJECT,
+        name=thread_id,
+        job_type="advisor-session",
+        config={
+            "university": profile.get("university", ""),
+            "visa_status": profile.get("visa_status", ""),
+            "field_of_study": profile.get("field_of_study", ""),
+        },
+    )
+    _rows: list[list] = []
+    _turn_n = 0
+
     # ── Import graph (after weave.init) ───────────────────────────────────────
     from graph import advisor_graph as graph
 
@@ -134,14 +158,46 @@ def main() -> None:
             console.print("[bold green]Profile updated![/bold green]\n")
             continue
 
+        reset_turn_tracking()
+        t0 = time.time()
         console.print("[dim]Thinking…[/dim]")
         try:
             answer = run_turn_traced(graph, query, profile, thread_id)
+            latency_ms = round((time.time() - t0) * 1000, 1)
             _print_answer(answer)
             _print_routing(graph, thread_id)
+
+            # ── Log turn metrics to W&B ───────────────────────────────────
+            _turn_n += 1
+            state_vals = graph.get_state({"configurable": {"thread_id": thread_id}}).values
+            searches = get_turn_searches()
+            search_queries_str = "; ".join(s.get("query", "") for s in searches)
+
+            _rows.append([
+                _turn_n,
+                query[:200],
+                ", ".join(state_vals.get("route", [])),
+                state_vals.get("route_reason", ""),
+                len(searches),
+                search_queries_str,
+                state_vals.get("claims_found", 0),
+                state_vals.get("critic_pass", True),
+                not state_vals.get("critic_pass", True),
+                latency_ms,
+            ])
+            wandb.log({
+                "turns": wandb.Table(columns=_TABLE_COLS, data=_rows),
+                "latency_ms": latency_ms,
+                "num_searches": len(searches),
+                "claims_found": state_vals.get("claims_found", 0),
+                "agents_called": len(state_vals.get("route", [])),
+            })
+
         except Exception as exc:
             console.print(f"[bold red]Error:[/bold red] {exc}")
             console.print("[dim]Please try again. If the error persists, check your API keys.[/dim]\n")
+
+    wandb.finish()
 
 
 if __name__ == "__main__":

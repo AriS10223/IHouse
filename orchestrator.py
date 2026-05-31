@@ -69,7 +69,8 @@ def router_node(state: AgentState) -> dict:
     system = ROUTER_SYSTEM.format(profile_str=profile_str)
     user = ROUTER_USER.format(query=query)
 
-    raw = chat(system=system, user=user, model=ROUTER_MODEL, max_tokens=256)
+    with weave.attributes({"task": "routing", "available_domains": ALL_DOMAINS}):
+        raw = chat(system=system, user=user, model=ROUTER_MODEL, max_tokens=256)
     agents, reason = _parse_route(raw)
 
     return {

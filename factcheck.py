@@ -87,26 +87,28 @@ def factcheck_node(state: AgentState) -> dict:
     draft = state.get("draft", "")
 
     if not draft.strip():
-        return {"final": "(No response generated.)" + _FALLBACK_DISCLAIMER}
+        return {"final": "(No response generated.)" + _FALLBACK_DISCLAIMER, "claims_found": 0}
 
     # Step 1: extract verifiable claims
     try:
         claims = _extract_claims(draft)
     except Exception as exc:
         print(f"[factcheck] Claim extraction failed: {exc}")
-        return {"final": draft + _FALLBACK_DISCLAIMER}
+        return {"final": draft + _FALLBACK_DISCLAIMER, "claims_found": 0}
 
     if not claims:
         # Nothing hard to verify — just add disclaimers
-        return {"final": draft + _FALLBACK_DISCLAIMER}
+        return {"final": draft + _FALLBACK_DISCLAIMER, "claims_found": 0}
 
     # Step 2: gather web evidence (route-aware domain restrictions)
     route = state.get("route", [])
     try:
-        evidence_str = _gather_evidence(claims, route=route)
+        with weave.attributes({"claims_extracted": len(claims), "route": route,
+                               "search_count": min(len(claims), FACT_CHECK_MAX_SEARCHES)}):
+            evidence_str = _gather_evidence(claims, route=route)
     except Exception as exc:
         print(f"[factcheck] Evidence gathering failed: {exc}")
-        return {"final": draft + _FALLBACK_DISCLAIMER}
+        return {"final": draft + _FALLBACK_DISCLAIMER, "claims_found": len(claims)}
 
     # Step 3: verify and correct
     try:
@@ -120,10 +122,10 @@ def factcheck_node(state: AgentState) -> dict:
             model=FACTCHECK_MODEL,
             max_tokens=FACTCHECK_MAX_TOKENS,
         )
-        return {"final": final.strip()}
+        return {"final": final.strip(), "claims_found": len(claims)}
     except Exception as exc:
         print(f"[factcheck] Verification LLM call failed: {exc}")
-        return {"final": draft + _FALLBACK_DISCLAIMER}
+        return {"final": draft + _FALLBACK_DISCLAIMER, "claims_found": len(claims)}
 
 
 # ── Critic node ───────────────────────────────────────────────────────────────
@@ -135,12 +137,13 @@ def critic_node(state: AgentState) -> dict:
     query = state.get("query", "")
 
     try:
-        raw = chat(
-            system=CRITIC_SYSTEM,
-            user=CRITIC_USER.format(query=query, final=final),
-            model=FACTCHECK_MODEL,
-            max_tokens=300,
-        )
+        with weave.attributes({"task": "critique", "response_length": len(final)}):
+            raw = chat(
+                system=CRITIC_SYSTEM,
+                user=CRITIC_USER.format(query=query, final=final),
+                model=FACTCHECK_MODEL,
+                max_tokens=300,
+            )
         clean = re.sub(r"```(?:json)?", "", raw).strip().strip("`")
         data = json.loads(clean)
         if data.get("pass") is True:

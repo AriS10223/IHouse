@@ -10,6 +10,22 @@ from __future__ import annotations
 
 import os
 
+# ── Turn-scoped search tracker ────────────────────────────────────────────────
+# Reset at the start of each turn in main.py; read after the turn completes.
+
+_turn_searches: list[dict] = []
+
+
+def reset_turn_tracking() -> None:
+    global _turn_searches
+    _turn_searches = []
+
+
+def get_turn_searches() -> list[dict]:
+    """Return searches made during the current turn (web + jobs)."""
+    return list(_turn_searches)
+
+
 # ── Authoritative domain lists per subject area ───────────────────────────────
 
 LEGAL_DOMAINS = [
@@ -38,6 +54,7 @@ DOMAIN_SEARCH_RESTRICTIONS: dict[str, list[str]] = {
 
 def web_search(query: str, max_results: int = 3) -> list[dict]:
     """General DuckDuckGo search. Degrades gracefully on failure."""
+    _turn_searches.append({"type": "web", "query": query})
     try:
         from duckduckgo_search import DDGS
         results = DDGS().text(query, max_results=max_results)
@@ -89,6 +106,7 @@ def search_adzuna_jobs(
     request fails — jobs agent degrades to training-knowledge advice only.
     Register free at developer.adzuna.com to get APP_ID and APP_KEY.
     """
+    _turn_searches.append({"type": "jobs", "query": keywords})
     app_id = os.environ.get("ADZUNA_APP_ID", "")
     app_key = os.environ.get("ADZUNA_APP_KEY", "")
     if not app_id or not app_key:

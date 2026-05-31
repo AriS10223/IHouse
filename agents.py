@@ -77,7 +77,8 @@ def _run_academic_agent_impl(state: AgentState) -> str:
     # Search the university's resources for this specific query
     if university and university.lower() not in ("unknown", "not specified"):
         search_query = f"{university} {query}"
-        results = web_search(search_query, max_results=4)
+        with weave.attributes({"search_type": "university_web", "university": university}):
+            results = web_search(search_query, max_results=4)
         university_context = format_search_results(results)
     else:
         university_context = "(University not specified — providing general guidance.)"
@@ -111,7 +112,8 @@ def _run_jobs_agent_impl(state: AgentState) -> str:
     else:
         keywords = f"{field} internship OR entry level" if field else "internship"
 
-    jobs = search_adzuna_jobs(keywords=keywords, max_results=5)
+    with weave.attributes({"search_type": "job_listings", "keywords": keywords}):
+        jobs = search_adzuna_jobs(keywords=keywords, max_results=5)
     job_listings = format_job_listings(jobs)
 
     system = JOBS_SYSTEM.format(
@@ -164,7 +166,8 @@ def agents_runner_node(state: AgentState) -> dict:
     outputs: dict[str, str] = {}
     for domain in route:
         if domain in AGENT_REGISTRY:
-            outputs[domain] = AGENT_REGISTRY[domain](state)
+            with weave.attributes({"domain": domain}):
+                outputs[domain] = AGENT_REGISTRY[domain](state)
         else:
             outputs[domain] = f"[Unknown domain: {domain}]"
     return {"agent_outputs": outputs}
