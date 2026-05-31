@@ -7,7 +7,6 @@ run_questionnaire() again to refresh answers.
 """
 from __future__ import annotations
 
-import json
 import os
 from typing import Optional
 
@@ -15,7 +14,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 from rich.panel import Panel
 
-from config import PROFILES_FILE
+import cache
 
 console = Console()
 
@@ -57,28 +56,14 @@ QUESTIONS: list[dict] = [
 
 # ── Profile I/O ───────────────────────────────────────────────────────────────
 
-def _load_all() -> dict:
-    if not os.path.exists(PROFILES_FILE):
-        return {}
-    with open(PROFILES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _save_all(profiles: dict) -> None:
-    with open(PROFILES_FILE, "w", encoding="utf-8") as f:
-        json.dump(profiles, f, indent=2, ensure_ascii=False)
-
-
 def load_profile(name: str) -> Optional[dict]:
     """Return the saved profile for *name* (case-insensitive), or None."""
-    return _load_all().get(name.strip().lower())
+    return cache.get_profile(name)
 
 
 def save_profile(profile: dict) -> None:
-    """Persist (or overwrite) a profile keyed by its lowercased name."""
-    profiles = _load_all()
-    profiles[profile["name"].strip().lower()] = profile
-    _save_all(profiles)
+    """Persist (or overwrite) a profile — writes Supabase + Redis."""
+    cache.set_profile(profile)
 
 
 # ── Questionnaire runner ──────────────────────────────────────────────────────
