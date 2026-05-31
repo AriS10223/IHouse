@@ -1,6 +1,8 @@
 # IHouse — International Student Advisor
 
-An AI-powered multi-agent advisor built for international university students. It covers the five domains that matter most when you first arrive: **visa & legal**, **academics**, **personal finance**, **jobs & internships**, and **taxes** — all in one CLI conversation that remembers you across sessions.
+An AI-powered multi-agent advisor built for international university students. It covers the five domains that matter most when you first arrive: **visa & legal**, **academics**, **personal finance**, **jobs & internships**, and **taxes** — all in one conversation that remembers you across sessions.
+
+Runs as a **Streamlit web app** (parchment-gold academia UI) or a **Rich CLI** — both backed by the same LangGraph pipeline.
 
 Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipoluri](https://github.com/anvipoluri), developed in collaboration with **Claude (Anthropic)**.
 
@@ -33,6 +35,7 @@ Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipolu
 | Cache | [Upstash Redis](https://upstash.com) — serverless, HTTP-based |
 | Web search | DuckDuckGo (no key required) |
 | Job listings | [Adzuna API](https://developer.adzuna.com) (free tier) |
+| Web UI | [Streamlit](https://streamlit.io) — parchment/academia theme, dark-mode resistant |
 | CLI | [Rich](https://github.com/Textualize/rich) |
 
 ### Model split
@@ -163,6 +166,20 @@ agents_runner  ──── runs only selected agents
 
 ---
 
+## Web UI
+
+`app.py` is a Streamlit frontend with a parchment-and-gold academia theme (dark-mode resistant via `.streamlit/config.toml`). It mirrors the three-page flow designed by [anvipoluri](https://github.com/anvipoluri/atlas-of-aid):
+
+| Page | What it does |
+|---|---|
+| **Landing** | i-House hero — "First time here" or "Welcome back" |
+| **Onboarding** | Collects name, university, nationality, visa status, field of study, post-study plan, time in USA — saves to Supabase + Redis |
+| **Chat** | Full conversation interface — sticky-note message bubbles, domain icon rail, "Consulted:" agent attribution per response, profile sidebar |
+
+The web UI calls the same `graph.invoke()` pipeline as the CLI — no separate API layer.
+
+---
+
 ## Setup
 
 **1. Clone and install**
@@ -181,7 +198,6 @@ py -m venv .venv
 | `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) | Yes |
 | `WANDB_API_KEY` | [wandb.ai](https://wandb.ai) → Settings → API keys | Yes |
 | `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` | Supabase → Project Settings → API | Yes |
-| `DATABASE_URL_SESSION` | Supabase → Project Settings → Database → Connection string (Session pooler, port 5432) | Yes |
 | `UPSTASH_REDIS_URL` + `UPSTASH_REDIS_TOKEN` | [console.upstash.com](https://console.upstash.com) | Yes |
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | [developer.adzuna.com](https://developer.adzuna.com) | No — jobs agent degrades gracefully |
 
@@ -206,14 +222,24 @@ cp .env.example .env
 ```
 
 **5. Run**
+
+Web UI (recommended):
+```bash
+.\.venv\Scripts\python.exe -m streamlit run app.py   # Windows
+# or: .venv/bin/python -m streamlit run app.py       # Mac/Linux
+```
+Then open `http://localhost:8501`.
+
+CLI (alternative):
 ```bash
 .\.venv\Scripts\python.exe main.py   # Windows
 # or: .venv/bin/python main.py       # Mac/Linux
 ```
 
-First run → 6-question onboarding (profile saved to Supabase + cached in Redis). Return runs → profile loaded from Redis, straight into the conversation.
+First run → onboarding form/questionnaire (profile saved to Supabase + cached in Redis). Return runs → profile loaded from Redis, straight into the conversation.
 
-In-session commands: `update profile` · `exit`
+Web UI sidebar commands: **Update profile** · **New session**  
+CLI in-session commands: `update profile` · `exit`
 
 ---
 

@@ -19,6 +19,15 @@ __pycache__/
 dist/
 build/
 
+# W&B runtime artefacts
+wandb/
+
+# Screenshots / debug images
+*.jpg
+*.jpeg
+*.png
+*.gif
+
 # OS
 .DS_Store
 Thumbs.db
