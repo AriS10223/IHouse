@@ -15,7 +15,7 @@ import re
 
 import weave
 
-from config import FACTCHECK_MODEL, FACTCHECK_MAX_TOKENS, FACT_CHECK_MAX_CLAIMS, FACT_CHECK_MAX_SEARCHES
+from config import FACTCHECK_MODEL, FACTCHECK_MAX_TOKENS, FACT_CHECK_MAX_CLAIMS, FACT_CHECK_MAX_SEARCHES, CRITIC_MODEL
 from llm import chat
 from prompts import (
     FACTCHECK_EXTRACT_SYSTEM,
@@ -141,7 +141,7 @@ def critic_node(state: AgentState) -> dict:
             raw = chat(
                 system=CRITIC_SYSTEM,
                 user=CRITIC_USER.format(query=query, final=final),
-                model=FACTCHECK_MODEL,
+                model=CRITIC_MODEL,
                 max_tokens=300,
             )
         clean = re.sub(r"```(?:json)?", "", raw).strip().strip("`")

@@ -26,7 +26,7 @@ Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipolu
 
 | Layer | Tool |
 |---|---|
-| LLM inference | [Groq](https://groq.com) — Llama 3.3 70B on LPU hardware (~600 tok/s) |
+| LLM inference | [Groq](https://groq.com) — two-model split on LPU hardware (~600 tok/s) |
 | Agent orchestration | [LangGraph](https://langchain-ai.github.io/langgraph/) |
 | Observability | [W&B Weave](https://wandb.ai/site/weave) + W&B Tables |
 | Database | [Supabase](https://supabase.com) — PostgreSQL |
@@ -34,6 +34,18 @@ Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipolu
 | Web search | DuckDuckGo (no key required) |
 | Job listings | [Adzuna API](https://developer.adzuna.com) (free tier) |
 | CLI | [Rich](https://github.com/Textualize/rich) |
+
+### Model split
+
+Two Groq-hosted models are used — one for reasoning-heavy work, one for fast classification:
+
+| Role | Model | Why |
+|---|---|---|
+| Domain agents | `meta-llama/llama-4-scout-17b-16e-instruct` | MoE architecture (17B active / 109B total params); best factual recall for visa law, tax rules, finance; 30k TPM free tier |
+| Synthesizer | `meta-llama/llama-4-scout-17b-16e-instruct` | Needs coherence across multi-domain outputs |
+| Fact-check + Revise | `meta-llama/llama-4-scout-17b-16e-instruct` | Claim extraction and web-grounded correction require strong reasoning |
+| Router | `llama-3.1-8b-instant` | JSON classification only; 8B is sufficient and has 500k TPD free |
+| Critic | `llama-3.1-8b-instant` | Pass/fail scoring on 4 criteria — minimal reasoning needed |
 
 ---
 

@@ -11,14 +11,17 @@ ADZUNA_APP_ID: str = os.environ.get("ADZUNA_APP_ID", "")
 ADZUNA_APP_KEY: str = os.environ.get("ADZUNA_APP_KEY", "")
 WANDB_PROJECT: str = "intl-student-advisor"
 
-# Groq models — all free tier, LPU-accelerated (~600 tok/s)
-FAST_MODEL: str = "llama-3.3-70b-versatile"   # router + agents
-STRONG_MODEL: str = "llama-3.3-70b-versatile"  # synth + factcheck
+# Groq models
+# Scout (MoE 17B active / 109B total): best reasoning + knowledge, 30k TPM free tier
+# 8b-instant: fast + high TPD (500k/day), ideal for simple classification tasks
+FAST_MODEL: str = "llama-3.1-8b-instant"                          # router, critic — simple JSON tasks
+STRONG_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"   # agents, synth, factcheck — reasoning + coherence
 
 ROUTER_MODEL: str = FAST_MODEL
-AGENT_MODEL: str = FAST_MODEL
+AGENT_MODEL: str = STRONG_MODEL
 SYNTH_MODEL: str = STRONG_MODEL
-FACTCHECK_MODEL: str = STRONG_MODEL
+FACTCHECK_MODEL: str = STRONG_MODEL   # extract claims + verify + revise
+CRITIC_MODEL: str = FAST_MODEL        # pass/fail JSON on 4 criteria — 8b is sufficient
 
 # Token limits — keep low for free tier
 MAX_TOKENS: int = 1024       # default
