@@ -1,0 +1,7 @@
+langgraph>=0.2.0
+langchain-core>=0.3.0
+openai>=1.0.0
+weave>=0.51.0
+python-dotenv>=1.0.0
+rich>=13.0.0
+duckduckgo-search>=6.0.0
