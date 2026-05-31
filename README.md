@@ -17,8 +17,8 @@ Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipolu
   - Academic questions → live search against your actual university's website
   - Jobs → live listings from Adzuna
 - **Reflection loop** — a critic node evaluates the fact-checked answer on four criteria (disclaimer present, query addressed, consistency, unverified markers). If it fails, a revise node fixes only the flagged issues before the answer is shown.
-- **Session memory** — conversation history persists across turns via LangGraph `MemorySaver`, so you can build on previous answers (e.g. refine a budget, follow up on visa questions).
-- **Full observability** — every agent call, routing decision, and fact-check is traced in [W&B Weave](https://wandb.ai) with token counts and latency.
+- **Persistent profiles** — user profiles are stored in Supabase PostgreSQL and cached in Upstash Redis so every session picks up exactly where you left off — no re-onboarding.
+- **Full observability** — every agent call, routing decision, fact-check, and search is traced in [W&B Weave](https://wandb.ai) with token counts and latency. Per-turn metrics (agents called, searches made, claims verified, critic pass/fail) are logged to a W&B dashboard table.
 
 ---
 
@@ -28,10 +28,126 @@ Built for a hackathon by [AriS10223](https://github.com/AriS10223) and [anvipolu
 |---|---|
 | LLM inference | [Groq](https://groq.com) — Llama 3.3 70B on LPU hardware (~600 tok/s) |
 | Agent orchestration | [LangGraph](https://langchain-ai.github.io/langgraph/) |
-| Observability | [W&B Weave](https://wandb.ai/site/weave) |
+| Observability | [W&B Weave](https://wandb.ai/site/weave) + W&B Tables |
+| Database | [Supabase](https://supabase.com) — PostgreSQL |
+| Cache | [Upstash Redis](https://upstash.com) — serverless, HTTP-based |
 | Web search | DuckDuckGo (no key required) |
 | Job listings | [Adzuna API](https://developer.adzuna.com) (free tier) |
 | CLI | [Rich](https://github.com/Textualize/rich) |
+
+---
+
+## Data layer
+
+User profiles are stored in **Supabase PostgreSQL** and served through an **Upstash Redis** cache. This matters because each turn injects the profile into every agent's system prompt — that's 5–8 reads per question. Without a cache, each question would hammer the database; with Redis in front, Supabase is only touched on cold starts and profile updates.
+
+```
+Read path
+─────────────────────────────────────────────────────────
+App  →  Redis GET profile:{name}
+              │
+              ├─ HIT  ──────────────────────────────────→  return (no DB call)
+              │
+              └─ MISS  →  Supabase SELECT WHERE name=?
+                                │
+                                └─  populate Redis (TTL 24h)  →  return
+
+Write path  (onboarding / "update profile" command)
+─────────────────────────────────────────────────────────
+App  →  Supabase UPSERT  (source of truth, always written first)
+     →  Redis SET profile:{name}  (write-through, TTL reset to 24h)
+```
+
+**Failure handling:** If Redis is unavailable, `cache.py` logs a warning and falls through directly to Supabase — the app never crashes because of a cache failure. The database is the source of truth; Redis is an optimisation, not a dependency.
+
+**Service role key:** The Python backend uses Supabase's service role key so all queries bypass Row Level Security. The key lives in `.env` server-side and is never exposed to clients. RLS enforcement is planned for the upcoming web frontend where a FastAPI backend will sit between the browser and Supabase.
+
+### Profiles table
+
+```sql
+create table profiles (
+    name            text primary key,
+    university      text,
+    nationality     text,
+    visa_status     text,
+    field_of_study  text,
+    post_study_plan text,
+    time_in_usa     text,
+    updated_at      timestamptz default now()
+);
+```
+
+---
+
+## Observability
+
+Every turn is traced end-to-end in W&B Weave and logged as a structured row in a W&B dashboard table.
+
+### Weave trace tree
+
+Each node in the pipeline is a named `@weave.op` with custom attributes attached via `weave.attributes()`, so the trace tree shows not just call structure but *why* each node did what it did:
+
+```
+run_turn
+  └─ router              {"task": "routing", "available_domains": [...]}
+  └─ agents_runner
+       ├─ agent_legal    {"domain": "legal"}
+       ├─ agent_academic {"domain": "academic", "search_type": "university_web", "university": "..."}
+       └─ agent_jobs     {"domain": "jobs", "search_type": "job_listings", "keywords": "..."}
+  └─ synthesizer
+  └─ fact_check          {"claims_extracted": N, "route": [...], "search_count": N}
+  └─ critic              {"task": "critique", "response_length": N}
+  └─ revise              (only if critic fails)
+```
+
+### W&B metrics table
+
+A `wandb.Table` named `turns` is rebuilt and logged after every query (W&B tables are immutable once logged — the rebuild-from-list pattern ensures the panel always shows the full session history):
+
+| Column | What it captures |
+|---|---|
+| `turn` | Turn number in the session |
+| `query` | The user's question (truncated to 200 chars) |
+| `agents_called` | Which domain agents fired (e.g. `legal, tax`) |
+| `route_reason` | The router's plain-English explanation for its choice |
+| `num_searches` | Total web + job searches that turn triggered |
+| `search_queries` | The actual strings sent to DuckDuckGo / Adzuna |
+| `claims_found` | Number of verifiable claims extracted by the fact-checker |
+| `critic_pass` | Whether the critic approved the answer on first pass |
+| `revision_made` | Whether a revision pass was needed |
+| `latency_ms` | Wall-clock time for the full turn |
+
+Scalar metrics (`latency_ms`, `num_searches`, `claims_found`, `agents_called`) are also logged per turn for live line charts.
+
+---
+
+## Agent pipeline
+
+```
+user query
+    │
+    ▼
+ router  ──── classifies query, picks 1–3 domain agents
+    │
+    ▼
+agents_runner  ──── runs only selected agents
+  ├─ agent_legal    (USCIS / DHS / travel.state.gov sources)
+  ├─ agent_academic (live search against your university's website)
+  ├─ agent_finance  (CFPB / FDIC / Bankrate sources)
+  ├─ agent_jobs     (live Adzuna job listings)
+  └─ agent_tax      (IRS / SSA / Treasury sources)
+    │
+    ▼
+ synthesizer  ──── merges domain outputs into one coherent answer
+    │
+    ▼
+ factcheck  ──── extracts hard claims, web-verifies against authoritative domains
+    │
+    ▼
+ critic  ──── scores answer on 4 criteria
+    ├─ pass ──→ shown to user
+    └─ fail ──→ revise ──→ shown to user
+```
 
 ---
 
@@ -46,59 +162,46 @@ py -m venv .venv
 # or: .venv/bin/pip install -r requirements.txt       # Mac/Linux
 ```
 
-**2. Get API keys** (all free tiers, no credit card required)
+**2. Get API keys**
 
-| Key | Where to get it |
-|---|---|
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
-| `WANDB_API_KEY` | [wandb.ai](https://wandb.ai) → Settings → API keys |
-| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | [developer.adzuna.com](https://developer.adzuna.com) |
+| Key | Where | Required |
+|---|---|---|
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) | Yes |
+| `WANDB_API_KEY` | [wandb.ai](https://wandb.ai) → Settings → API keys | Yes |
+| `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` | Supabase → Project Settings → API | Yes |
+| `DATABASE_URL_SESSION` | Supabase → Project Settings → Database → Connection string (Session pooler, port 5432) | Yes |
+| `UPSTASH_REDIS_URL` + `UPSTASH_REDIS_TOKEN` | [console.upstash.com](https://console.upstash.com) | Yes |
+| `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | [developer.adzuna.com](https://developer.adzuna.com) | No — jobs agent degrades gracefully |
 
-**3. Configure**
+**3. Create the profiles table** in your Supabase SQL editor:
+```sql
+create table profiles (
+    name            text primary key,
+    university      text,
+    nationality     text,
+    visa_status     text,
+    field_of_study  text,
+    post_study_plan text,
+    time_in_usa     text,
+    updated_at      timestamptz default now()
+);
+```
+
+**4. Configure**
 ```bash
 cp .env.example .env
 # fill in your keys
 ```
 
-**4. Run**
+**5. Run**
 ```bash
 .\.venv\Scripts\python.exe main.py   # Windows
 # or: .venv/bin/python main.py       # Mac/Linux
 ```
 
-First run → 7-question onboarding. Return runs → picks up where you left off.
+First run → 6-question onboarding (profile saved to Supabase + cached in Redis). Return runs → profile loaded from Redis, straight into the conversation.
 
 In-session commands: `update profile` · `exit`
-
----
-
-## Agent pipeline
-
-```
-user query
-    │
-    ▼
- router  ──── classifies query, picks 1–3 agents
-    │
-    ▼
-agents_runner  ──── runs only selected agents
-  ├─ agent_legal    (USCIS / DHS sources)
-  ├─ agent_academic (live university search)
-  ├─ agent_finance  (CFPB / Bankrate sources)
-  ├─ agent_jobs     (live Adzuna listings)
-  └─ agent_tax      (IRS / SSA sources)
-    │
-    ▼
- synthesizer  ──── merges outputs into one answer
-    │
-    ▼
- factcheck  ──── web-verifies hard claims
-    │
-    ▼
- critic  ──── scores answer on 4 criteria
-    ├─ pass ──→ shown to user
-    └─ fail ──→ revise ──→ shown to user
-```
 
 ---
 
